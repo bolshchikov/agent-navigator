@@ -1,0 +1,50 @@
+[package]
+name = "agent-navigator"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+description = "Agent-native HTTP client: fetch, classify, extract, and discover structured web surfaces without executing JavaScript."
+license = "Apache-2.0"
+repository = "https://github.com/bolshchikov/agent-navigator"
+readme = "README.md"
+keywords = ["agent", "mcp", "http", "fetch", "webmcp"]
+categories = ["command-line-utilities", "web-programming::http-client"]
+
+[lib]
+name = "agent_navigator"
+path = "src/lib.rs"
+
+[[bin]]
+name = "agent-navigator"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+bytes = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+clap = { version = "4", features = ["derive"] }
+cookie_store = "0.22"
+dirs = "6"
+htmd = "0.5"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "cookies", "gzip", "brotli", "deflate", "json", "charset", "http2", "form"] }
+reqwest_cookie_store = "0.10"
+rmcp = { version = "3.1", features = ["server", "transport-io"] }
+robotstxt = "0.3"
+schemars = "1"
+scraper = "0.27"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std", "fs", "time"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+url = { version = "2", features = ["serde"] }
+
+[dev-dependencies]
+pretty_assertions = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+wiremock = "0.6"
+
+[profile.release]
+lto = true
+codegen-units = 1

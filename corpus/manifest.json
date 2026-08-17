@@ -1,0 +1,61 @@
+{
+  "fixtures": [
+    {
+      "name": "static_article",
+      "html": "fixtures/static_article.html",
+      "expected_tier": "static-readable"
+    },
+    {
+      "name": "spa_empty",
+      "html": "fixtures/spa_empty.html",
+      "expected_tier": "js-required"
+    },
+    {
+      "name": "next_ssr",
+      "html": "fixtures/next_ssr.html",
+      "expected_tier": "static-readable"
+    },
+    {
+      "name": "webmcp_form",
+      "html": "fixtures/webmcp_form.html",
+      "expected_tier": "structured"
+    },
+    {
+      "name": "jsonld_search",
+      "html": "fixtures/jsonld_search.html",
+      "expected_tier": "structured"
+    },
+    {
+      "name": "imperative_only",
+      "html": "fixtures/imperative_only.html",
+      "expected_tier": "js-required"
+    }
+  ],
+  "live": [
+    {
+      "name": "example_com",
+      "url": "https://example.com/",
+      "expected_tier": "static-readable"
+    },
+    {
+      "name": "wikipedia_rust",
+      "url": "https://en.wikipedia.org/wiki/Rust_(programming_language)",
+      "expected_tier": "static-readable"
+    },
+    {
+      "name": "llms_txt_org",
+      "url": "https://llmstxt.org/",
+      "expected_tier": "structured"
+    },
+    {
+      "name": "french_bistro_webmcp",
+      "url": "https://googlechromelabs.github.io/webmcp-tools/demos/french-bistro/",
+      "expected_tier": "structured"
+    },
+    {
+      "name": "docs_rs_reqwest",
+      "url": "https://docs.rs/reqwest",
+      "expected_tier": "static-readable"
+    }
+  ]
+}

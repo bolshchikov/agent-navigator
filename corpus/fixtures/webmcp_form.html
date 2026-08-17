@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <title>Le Petit Bistro</title>
+  <meta name="description" content="Reserve a table">
+</head>
+<body>
+  <main>
+    <h2>Le Petit Bistro</h2>
+    <form
+      id="reservationForm"
+      toolname="book_table_le_petit_bistro"
+      tooldescription="Initiates a dining reservation request at Le Petit Bistro."
+      action="/reserve"
+      method="post"
+      toolautosubmit>
+      <label for="name">Full Name</label>
+      <input type="text" id="name" name="name" required toolparamdescription="Customer's full name">
+      <label for="guests">Guests</label>
+      <select id="guests" name="guests" required>
+        <option value="1">1 Person</option>
+        <option value="2">2 People</option>
+      </select>
+      <button type="submit">Request Reservation</button>
+    </form>
+  </main>
+</body>
+</html>
