@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: agent-navigator
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    maxShutdownDelaySeconds: 30
+    disk:
+      name: cookies
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: AGENT_NAVIGATOR_SESSION_DIR
+        value: /var/data/agent-navigator/sessions
+      - key: RUST_LOG
+        value: info
+      - key: MCP_ALLOWED_HOSTS
+        sync: false

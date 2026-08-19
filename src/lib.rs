@@ -11,6 +11,7 @@ pub mod error;
 pub mod extract;
 pub mod http;
 pub mod mcp;
+pub mod mcp_http;
 pub mod session;
 
 pub use client::{AgentNavigator, NavigateRequest};

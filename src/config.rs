@@ -6,6 +6,17 @@ use serde::{Deserialize, Serialize};
 
 use crate::envelope::CapabilityTier;
 
+/// Outbound URL policy. CLI/stdio keep loopback (tests, local mocks). Public HTTP MCP does not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum UrlPolicy {
+    #[default]
+    AllowLoopback,
+    PublicOnly,
+}
+
+/// Body cap for the public HTTP demo (CLI stays at [`DEFAULT_MAX_BODY_BYTES`]).
+pub const PUBLIC_MAX_BODY_BYTES: u64 = 2 * 1024 * 1024;
+
 pub const USER_AGENT: &str =
     "AgentNavigator/0.1.0 (+https://github.com/bolshchikov/agent-navigator; agent-native HTTP client; no JavaScript)";
 
@@ -27,6 +38,13 @@ pub struct ClientConfig {
     /// Per-host classification overrides (FR17). Host is lowercase, no port if default.
     pub tier_overrides: BTreeMap<String, CapabilityTier>,
     pub session_dir: PathBuf,
+    pub url_policy: UrlPolicy,
+    /// When false, `ignore_robots` on requests is ignored (public HTTP demo).
+    pub allow_ignore_robots: bool,
+    /// When false, caller `headers` are dropped (public HTTP demo).
+    pub allow_custom_headers: bool,
+    /// When false, `include_html` is forced off (public HTTP demo).
+    pub allow_include_html: bool,
 }
 
 impl Default for ClientConfig {
@@ -41,11 +59,26 @@ impl Default for ClientConfig {
             ignore_robots: false,
             tier_overrides: BTreeMap::new(),
             session_dir: default_session_dir(),
+            url_policy: UrlPolicy::AllowLoopback,
+            allow_ignore_robots: true,
+            allow_custom_headers: true,
+            allow_include_html: true,
         }
     }
 }
 
 impl ClientConfig {
+    /// Policy for a public Streamable HTTP MCP demo: not an open proxy into private nets.
+    pub fn public_http_demo(mut self) -> Self {
+        self.url_policy = UrlPolicy::PublicOnly;
+        self.allow_ignore_robots = false;
+        self.allow_custom_headers = false;
+        self.allow_include_html = false;
+        self.ignore_robots = false;
+        self.max_body_bytes = PUBLIC_MAX_BODY_BYTES;
+        self
+    }
+
     pub fn override_for(&self, host: &str) -> Option<CapabilityTier> {
         let host = host.to_ascii_lowercase();
         self.tier_overrides

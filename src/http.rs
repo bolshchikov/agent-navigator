@@ -7,7 +7,7 @@ use reqwest::header::{HeaderMap, HeaderName, HeaderValue, LOCATION, USER_AGENT};
 use reqwest::{Method, StatusCode};
 use url::Url;
 
-use crate::config::ClientConfig;
+use crate::config::{ClientConfig, UrlPolicy};
 use crate::error::{Error, Result};
 use crate::session::Session;
 
@@ -184,7 +184,7 @@ async fn send_follow_redirects(
     let mut warnings = Vec::new();
 
     for hop in 0..=cfg.redirect_cap {
-        ensure_fetchable_url(&url)?;
+        ensure_fetchable_url(&url, cfg.url_policy)?;
         let (allowed, _, _) = ctx
             .robots
             .allowed(ctx.probe, cfg, &url, ctx.ignore_robots)
@@ -305,10 +305,11 @@ fn is_retryable(err: &Error) -> bool {
 /// Shared client used for robots.txt / llms.txt probes (no cookies).
 /// Cross-origin and blocked-address redirects are not followed.
 pub fn probe_client(cfg: &ClientConfig) -> Result<reqwest::Client> {
+    let policy = cfg.url_policy;
     Ok(reqwest::Client::builder()
         .user_agent(&cfg.user_agent)
         .timeout(cfg.timeout)
-        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+        .redirect(reqwest::redirect::Policy::custom(move |attempt| {
             if attempt.previous().len() > 5 {
                 return attempt.error("too many probe redirects");
             }
@@ -318,7 +319,7 @@ pub fn probe_client(cfg: &ClientConfig) -> Result<reqwest::Client> {
             if origin_of(start) != origin_of(attempt.url()) {
                 return attempt.stop();
             }
-            if ensure_fetchable_url(attempt.url()).is_err() {
+            if ensure_fetchable_url(attempt.url(), policy).is_err() {
                 return attempt.error("blocked probe redirect target");
             }
             attempt.follow()
@@ -344,7 +345,7 @@ pub fn origin_of(url: &Url) -> String {
     }
 }
 
-pub fn ensure_fetchable_url(url: &Url) -> Result<()> {
+pub fn ensure_fetchable_url(url: &Url, policy: UrlPolicy) -> Result<()> {
     if url.scheme() != "http" && url.scheme() != "https" {
         return Err(Error::ForbiddenUrl {
             url: url.to_string(),
@@ -360,13 +361,62 @@ pub fn ensure_fetchable_url(url: &Url) -> Result<()> {
             reason: "refusing link-local / cloud-metadata address".into(),
         });
     }
+    if policy == UrlPolicy::PublicOnly && is_private_or_loopback(url) {
+        return Err(Error::ForbiddenUrl {
+            url: url.to_string(),
+            reason: "refusing loopback / private-network address".into(),
+        });
+    }
     Ok(())
+}
+
+fn is_private_or_loopback(url: &Url) -> bool {
+    match url.host() {
+        Some(url::Host::Ipv4(addr)) => ipv4_blocked_public(addr),
+        Some(url::Host::Ipv6(addr)) => ipv6_blocked_public(addr),
+        Some(url::Host::Domain(d)) => {
+            let d = d.to_ascii_lowercase();
+            d == "localhost" || d.ends_with(".localhost") || d == "localhost."
+        }
+        None => true,
+    }
+}
+
+fn ipv4_blocked_public(addr: Ipv4Addr) -> bool {
+    addr.is_loopback()
+        || addr.is_private()
+        || addr.is_unspecified()
+        || addr.is_broadcast()
+        || addr.is_link_local()
+        || is_cgnat_v4(addr)
+        || is_aws_metadata_v4(addr)
+}
+
+fn is_cgnat_v4(addr: Ipv4Addr) -> bool {
+    let o = addr.octets();
+    o[0] == 100 && (64..128).contains(&o[1])
+}
+
+fn ipv6_blocked_public(addr: Ipv6Addr) -> bool {
+    if addr.is_loopback() || addr.is_unspecified() {
+        return true;
+    }
+    if let Some(v4) = addr.to_ipv4_mapped() {
+        return ipv4_blocked_public(v4);
+    }
+    // Unique local fc00::/7
+    (addr.segments()[0] & 0xfe00) == 0xfc00
 }
 
 fn is_link_local_or_metadata(url: &Url) -> bool {
     match url.host() {
         Some(url::Host::Ipv4(addr)) => addr.is_link_local() || is_aws_metadata_v4(addr),
-        Some(url::Host::Ipv6(addr)) => is_link_local_v6(addr) || is_aws_metadata_v6(addr),
+        Some(url::Host::Ipv6(addr)) => {
+            if let Some(v4) = addr.to_ipv4_mapped() {
+                return v4.is_link_local() || is_aws_metadata_v4(v4);
+            }
+            is_link_local_v6(addr) || is_aws_metadata_v6(addr)
+        }
         Some(url::Host::Domain(d)) => {
             let d = d.to_ascii_lowercase();
             d == "metadata.google.internal" || d.ends_with(".metadata.google.internal")
@@ -556,19 +606,43 @@ mod tests {
     #[test]
     fn rejects_non_http_schemes() {
         let url = Url::parse("file:///etc/passwd").unwrap();
-        assert!(ensure_fetchable_url(&url).is_err());
+        assert!(ensure_fetchable_url(&url, UrlPolicy::AllowLoopback).is_err());
         let url = Url::parse("ftp://example.com/a").unwrap();
-        assert!(ensure_fetchable_url(&url).is_err());
+        assert!(ensure_fetchable_url(&url, UrlPolicy::AllowLoopback).is_err());
     }
 
     #[test]
     fn rejects_link_local_metadata() {
         let url = Url::parse("http://169.254.169.254/latest/meta-data/").unwrap();
-        assert!(ensure_fetchable_url(&url).is_err());
+        assert!(ensure_fetchable_url(&url, UrlPolicy::AllowLoopback).is_err());
         let url = Url::parse("http://metadata.google.internal/").unwrap();
-        assert!(ensure_fetchable_url(&url).is_err());
+        assert!(ensure_fetchable_url(&url, UrlPolicy::AllowLoopback).is_err());
         let url = Url::parse("http://127.0.0.1:3000/").unwrap();
-        assert!(ensure_fetchable_url(&url).is_ok());
+        assert!(ensure_fetchable_url(&url, UrlPolicy::AllowLoopback).is_ok());
+    }
+
+    #[test]
+    fn public_only_rejects_loopback_and_rfc1918() {
+        let policy = UrlPolicy::PublicOnly;
+        assert!(
+            ensure_fetchable_url(&Url::parse("http://127.0.0.1:3000/").unwrap(), policy).is_err()
+        );
+        assert!(ensure_fetchable_url(&Url::parse("http://localhost/").unwrap(), policy).is_err());
+        assert!(ensure_fetchable_url(&Url::parse("http://10.0.0.1/").unwrap(), policy).is_err());
+        assert!(ensure_fetchable_url(&Url::parse("http://192.168.1.1/").unwrap(), policy).is_err());
+        assert!(ensure_fetchable_url(&Url::parse("http://172.16.0.1/").unwrap(), policy).is_err());
+        assert!(ensure_fetchable_url(&Url::parse("http://100.64.0.1/").unwrap(), policy).is_err());
+        assert!(ensure_fetchable_url(&Url::parse("http://[::1]/").unwrap(), policy).is_err());
+        assert!(ensure_fetchable_url(&Url::parse("https://example.com/").unwrap(), policy).is_ok());
+        assert!(ensure_fetchable_url(
+            &Url::parse("http://[::ffff:169.254.169.254]/").unwrap(),
+            policy
+        )
+        .is_err());
+        assert!(
+            ensure_fetchable_url(&Url::parse("http://[::ffff:127.0.0.1]/").unwrap(), policy)
+                .is_err()
+        );
     }
 
     #[test]

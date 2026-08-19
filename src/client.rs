@@ -8,7 +8,7 @@ use serde_json::json;
 use url::Url;
 
 use crate::classify::{classify, ClassificationSignals};
-use crate::config::ClientConfig;
+use crate::config::{ClientConfig, UrlPolicy};
 use crate::discover::{discover_in_html, parse_llms_txt, HtmlForm};
 use crate::envelope::{
     AvailableTool, CapabilityTier, Content, EnvelopeStatus, EscalationKind, FetchEnvelope,
@@ -63,7 +63,13 @@ impl AgentNavigator {
         })
     }
 
-    pub async fn navigate(&self, req: NavigateRequest) -> FetchEnvelope {
+    pub async fn navigate(&self, mut req: NavigateRequest) -> FetchEnvelope {
+        if !self.config.allow_include_html {
+            req.include_html = false;
+        }
+        if !self.config.allow_custom_headers {
+            req.headers.clear();
+        }
         let started = Instant::now();
         let session_name = req.session.clone().unwrap_or_else(|| "default".into());
         tracing::info!(
@@ -310,8 +316,9 @@ impl AgentNavigator {
         started: Instant,
     ) -> crate::error::Result<FetchEnvelope> {
         let url = Url::parse(&req.url)?;
-        ensure_fetchable_url(&url)?;
-        let ignore_robots = req.ignore_robots || self.config.ignore_robots;
+        ensure_fetchable_url(&url, self.config.url_policy)?;
+        let ignore_robots =
+            (req.ignore_robots || self.config.ignore_robots) && self.config.allow_ignore_robots;
         if ignore_robots {
             tracing::warn!(
                 url = %url,
@@ -608,7 +615,7 @@ impl AgentNavigator {
 
         let mut llms_txt = None;
         for url in &candidates {
-            match fetch_llms(&self.probe, url).await {
+            match fetch_llms(&self.probe, url, self.config.url_policy).await {
                 Ok(Some(doc)) => {
                     llms_txt = Some(doc);
                     break;
@@ -617,13 +624,14 @@ impl AgentNavigator {
                 Err(err) => warnings.push(format!("llms.txt probe {url}: {err}")),
             }
         }
-        let llms_full_txt = match fetch_llms(&self.probe, &origin_full).await {
-            Ok(doc) => doc,
-            Err(err) => {
-                warnings.push(format!("llms-full.txt probe: {err}"));
-                None
-            }
-        };
+        let llms_full_txt =
+            match fetch_llms(&self.probe, &origin_full, self.config.url_policy).await {
+                Ok(doc) => doc,
+                Err(err) => {
+                    warnings.push(format!("llms-full.txt probe: {err}"));
+                    None
+                }
+            };
 
         let entry = CachedDiscovery::fresh(llms_txt, llms_full_txt, warnings);
         self.discovery
@@ -978,9 +986,10 @@ fn llms_candidate_urls(page_url: &Url) -> Vec<String> {
 async fn fetch_llms(
     client: &reqwest::Client,
     url: &str,
+    policy: UrlPolicy,
 ) -> crate::error::Result<Option<crate::envelope::LlmsTxtDocument>> {
     let parsed = Url::parse(url)?;
-    if ensure_fetchable_url(&parsed).is_err() {
+    if ensure_fetchable_url(&parsed, policy).is_err() {
         return Ok(None);
     }
     let resp = client.get(url).send().await?;

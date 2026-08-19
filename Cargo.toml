@@ -28,14 +28,16 @@ dirs = "6"
 htmd = "0.5"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "cookies", "gzip", "brotli", "deflate", "json", "charset", "http2", "form"] }
 reqwest_cookie_store = "0.10"
-rmcp = { version = "3.1", features = ["server", "transport-io"] }
+rmcp = { version = "3.1", features = ["server", "transport-io", "transport-streamable-http-server"] }
 robotstxt = "0.3"
 schemars = "1"
 scraper = "0.27"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std", "fs", "time"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std", "fs", "time", "net", "signal"] }
+axum = "0.8"
+http = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 url = { version = "2", features = ["serde"] }

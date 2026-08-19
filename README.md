@@ -28,7 +28,8 @@ Every command returns:
 cargo run -- navigate https://example.com/
 cargo run -- discover https://llmstxt.org/
 cargo run -- extract https://en.wikipedia.org/wiki/Rust_(programming_language)
-cargo run -- mcp          # stdio MCP server
+cargo run -- mcp          # stdio MCP server (local Cursor / Claude Code)
+cargo run -- mcp --http   # Streamable HTTP MCP at /mcp (bind 0.0.0.0:$PORT)
 cargo run -- corpus       # fixture corpus
 cargo run -- corpus --live
 ```
@@ -44,12 +45,19 @@ cargo run -- corpus --live
 and arguments. Actions without a concrete HTTP `EntryPoint` remain visible as
 non-invocable metadata.
 
-## Defaults on PRD open questions
+## Hosting (Render)
 
-1. **Standalone tool** from day one (this repo), not an internal-only library.
-2. **Session sharing with a browser tool is v2.** Cookies persist per named session on disk; there is no Playwright handoff protocol yet.
-3. **User-Agent always self-identifies.** Caller `User-Agent` headers are ignored.
+This is a CLI + MCP server, not a website. A Render **Web Service** needs Streamable HTTP:
 
-## Phasing
+```bash
+agent-navigator mcp --http --allowed-host your-service.onrender.com
+```
 
-This tree covers Phase 1 (HTTP + extraction + CLI/MCP), Phase 2 (discovery + classifier), and enough of Phase 3–4 to surface/invoke declarative WebMCP and static HTML forms over HTTP. Rate limiting polish is Phase 5.
+- MCP URL: `https://<service>.onrender.com/mcp`
+- Health: `GET /health`
+- Docker image in `Dockerfile`; Blueprint in `render.yaml` (Starter plan + 1 GB disk at `/var/data`).
+- Set `MCP_ALLOWED_HOSTS` to the onrender hostname (and any custom domain). `RENDER_EXTERNAL_HOSTNAME` is picked up automatically when present.
+
+The public demo is an outbound HTTP client. It refuses loopback/private URLs, ignores `ignore_robots` / caller headers / `include_html`, rate-limits `/mcp`, and namespaces cookie jars per MCP session. Do not send secrets to a public instance. Free-tier spin-down will drop MCP sessions; use **Starter**.
+
+Local stdio MCP is unchanged: `cargo run -- mcp`.

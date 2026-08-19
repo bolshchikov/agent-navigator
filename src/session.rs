@@ -115,6 +115,26 @@ pub fn validate_session_name(name: &str) -> Result<()> {
     Ok(())
 }
 
+/// Cookie-jar name for a public HTTP MCP tenant. Keeps `[A-Za-z0-9_-]{1,64}`.
+pub fn namespaced_session(mcp_session_id: &str, jar: &str) -> String {
+    let ns = sanitize_session_fragment(mcp_session_id, 32);
+    let jar = sanitize_session_fragment(jar, 31);
+    format!("{ns}_{jar}")
+}
+
+fn sanitize_session_fragment(s: &str, max: usize) -> String {
+    let cleaned: String = s
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .take(max)
+        .collect();
+    if cleaned.is_empty() {
+        "anon".into()
+    } else {
+        cleaned
+    }
+}
+
 fn open_cookie_file(path: &Path) -> Result<fs::File> {
     #[cfg(unix)]
     {
@@ -143,5 +163,18 @@ mod tests {
         assert!(validate_session_name("foo.json").is_err());
         assert!(validate_session_name("default").is_ok());
         assert!(validate_session_name("agent-1_prod").is_ok());
+    }
+
+    #[test]
+    fn namespaced_session_stays_within_rules() {
+        let name = namespaced_session("550e8400-e29b-41d4-a716-446655440000", "default");
+        assert!(validate_session_name(&name).is_ok(), "{name}");
+        assert_ne!(
+            namespaced_session("session-a", "default"),
+            namespaced_session("session-b", "default")
+        );
+        let long = namespaced_session(&"x".repeat(80), &"y".repeat(80));
+        assert!(long.len() <= 64);
+        assert!(validate_session_name(&long).is_ok());
     }
 }

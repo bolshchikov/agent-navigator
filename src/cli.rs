@@ -90,8 +90,18 @@ pub enum Command {
         #[arg(long, default_value = "{}")]
         args: String,
     },
-    /// Start the MCP server on stdio.
-    Mcp,
+    /// Start the MCP server (stdio JSON-RPC, or Streamable HTTP with `--http`).
+    Mcp {
+        /// Serve Streamable HTTP instead of stdio (bind 0.0.0.0:$PORT, path /mcp).
+        #[arg(long)]
+        http: bool,
+        /// Bind address for `--http` (default `0.0.0.0:$PORT` or `0.0.0.0:10000`).
+        #[arg(long, requires = "http")]
+        bind: Option<String>,
+        /// Allowed `Host` header values. Repeatable. Also `MCP_ALLOWED_HOSTS` and `RENDER_EXTERNAL_HOSTNAME`.
+        #[arg(long = "allowed-host", requires = "http")]
+        allowed_hosts: Vec<String>,
+    },
     /// Run the local fixture corpus (and optionally live URLs).
     Corpus {
         #[arg(long, default_value = "corpus/manifest.json")]
@@ -106,7 +116,26 @@ pub async fn run() -> anyhow::Result<()> {
     let config = build_config(&cli)?;
 
     match cli.command {
-        Command::Mcp => run_mcp(config).await,
+        Command::Mcp {
+            http,
+            bind,
+            allowed_hosts,
+        } => {
+            if http {
+                let bind = crate::mcp_http::default_bind(bind.as_deref());
+                let allowed_hosts = crate::mcp_http::collect_allowed_hosts(&allowed_hosts, &bind);
+                crate::mcp_http::run_http_mcp(
+                    config,
+                    crate::mcp_http::HttpMcpOptions {
+                        bind,
+                        allowed_hosts,
+                    },
+                )
+                .await
+            } else {
+                run_mcp(config).await
+            }
+        }
         Command::Corpus { manifest, live } => crate::corpus::run(&manifest, live).await,
         other => {
             let client = AgentNavigator::new(config)?;
@@ -136,15 +165,20 @@ fn build_config(cli: &Cli) -> anyhow::Result<ClientConfig> {
     } else {
         Default::default()
     };
-    Ok(ClientConfig {
+    let session_dir = cli
+        .session_dir
+        .clone()
+        .or_else(|| std::env::var_os("AGENT_NAVIGATOR_SESSION_DIR").map(std::path::PathBuf::from));
+    let mut config = ClientConfig {
         ignore_robots: cli.ignore_robots,
-        session_dir: cli
-            .session_dir
-            .clone()
-            .unwrap_or_else(crate::config::default_session_dir),
+        session_dir: session_dir.unwrap_or_else(crate::config::default_session_dir),
         tier_overrides,
         ..ClientConfig::default()
-    })
+    };
+    if matches!(cli.command, Command::Mcp { http: true, .. }) {
+        config = config.public_http_demo();
+    }
+    Ok(config)
 }
 
 async fn dispatch(
@@ -241,7 +275,7 @@ async fn dispatch(
                 .call_jsonld_action(&url, &name, args, Some(session.to_string()), ignore_robots)
                 .await
         }
-        Command::Mcp | Command::Corpus { .. } => unreachable!(),
+        Command::Mcp { .. } | Command::Corpus { .. } => unreachable!(),
     }
 }
 
