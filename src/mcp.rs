@@ -145,7 +145,8 @@ fn mcp_session_id(ctx: &RequestContext<RoleServer>) -> Option<String> {
 #[tool_router]
 impl AgentNavigatorMcp {
     #[tool(
-        description = "Fetch a URL without executing JavaScript. Returns a typed envelope: status, capability_tier (structured | static-readable | js-required), markdown content, discovery metadata, and available tools. js-required is an escalation signal, not a silent empty page. WebMCP Imperative API is not supported."
+        description = "Fetch a URL without executing JavaScript. Returns a typed envelope: status, capability_tier (structured | static-readable | js-required), markdown content, discovery metadata, and available tools. js-required is an escalation signal, not a silent empty page. WebMCP Imperative API is not supported.",
+        annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn navigate(
         &self,
@@ -159,7 +160,8 @@ impl AgentNavigatorMcp {
     }
 
     #[tool(
-        description = "Fetch a URL and return extracted markdown plus metadata. Same envelope as navigate."
+        description = "Fetch a URL and return extracted markdown plus metadata. Same envelope as navigate.",
+        annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn extract(
         &self,
@@ -173,7 +175,8 @@ impl AgentNavigatorMcp {
     }
 
     #[tool(
-        description = "Discover agent-facing surfaces on a URL: llms.txt, JSON-LD Actions, OpenGraph, declarative WebMCP tools. Imperative WebMCP is detected and reported as unsupported."
+        description = "Discover agent-facing surfaces on a URL: llms.txt, JSON-LD Actions, OpenGraph, declarative WebMCP tools. Imperative WebMCP is detected and reported as unsupported.",
+        annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn discover(
         &self,
@@ -408,5 +411,57 @@ fn compact_json(value: &serde_json::Value) -> String {
             s.chars().take(MAX).collect::<String>(),
             s.len()
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tool_named<'a>(tools: &'a [rmcp::model::Tool], name: &str) -> &'a rmcp::model::Tool {
+        tools
+            .iter()
+            .find(|tool| tool.name == name)
+            .unwrap_or_else(|| panic!("missing MCP tool {name}"))
+    }
+
+    #[test]
+    fn fetch_tools_advertise_read_only_hint() {
+        let tools = AgentNavigatorMcp::tool_router().list_all();
+        for name in ["navigate", "extract", "discover"] {
+            let tool = tool_named(&tools, name);
+            let annotations = tool
+                .annotations
+                .as_ref()
+                .unwrap_or_else(|| panic!("{name} missing annotations"));
+            assert_eq!(
+                annotations.read_only_hint,
+                Some(true),
+                "{name} should be marked read-only"
+            );
+            assert_eq!(
+                annotations.open_world_hint,
+                Some(true),
+                "{name} fetches arbitrary http(s) URLs"
+            );
+
+            let json = serde_json::to_value(tool).expect("serialize tool");
+            assert_eq!(
+                json["annotations"]["readOnlyHint"],
+                serde_json::json!(true),
+                "{name} must serialize MCP readOnlyHint"
+            );
+        }
+
+        for name in ["call_webmcp_tool", "submit_form", "call_jsonld_action"] {
+            let tool = tool_named(&tools, name);
+            assert_ne!(
+                tool.annotations
+                    .as_ref()
+                    .and_then(|annotations| annotations.read_only_hint),
+                Some(true),
+                "{name} mutates remote state and must not be advertised as read-only"
+            );
+        }
     }
 }
